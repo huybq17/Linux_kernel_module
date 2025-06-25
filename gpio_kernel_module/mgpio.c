@@ -4,12 +4,18 @@
 #include <linux/cdev.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/gpio.h>
 
 #define DRIVER_AUTHOR "huysn11b@gmail.com"
 #define DRIVER_DESC   "EXAMPLE: Control led on/off with GPIO using kernel module"
 
 #define NPAGES   1
 #define BUFSIZE  16U
+
+#define GPIO_NUMBER_27 27
+#define LOW  0
+#define HIGH 1
+
 
 struct m_foo_dev {
     int size;
@@ -19,7 +25,7 @@ struct m_foo_dev {
     struct cdev m_cdev;
 } mdev;
 
-/*  Function Prototypes */
+// Function Prototypes
 static int      __init gpio_kernel_module_init(void);
 static void     __exit gpio_kernel_module_exit(void);
 static int      m_open(struct inode *inode, struct file *file);
@@ -36,37 +42,18 @@ static struct file_operations fops =
     .release    = m_release,
 };
 
-/* This function will be called when we open the Device file */
+// This function will be called when we open the Device file
 static int m_open(struct inode *inode, struct file *file)
 {
-    int ret;
-
-    ret = gpio_request(GPIO_NUMBER_27, "gpio_27");
-    if (ret) {
-        pr_err("gpio_request failed\n");
-        return ret;
-    }
-
-    ret = gpio_direction_output(GPIO_NUMBER_27, LOW);
-    if (ret) {
-        pr_err("gpio_direction_output failed\n");
-        gpio_free(GPIO_NUMBER_27);
-        return ret;
-    }
-
     pr_info("System call open() called...!!!\n");
-    pr_info("GPIO27 configured as output\r\n");
 
     return 0;
 }
 
-/* This function will be called when we close the Device file */
+// This function will be called when we close the Device file
 static int m_release(struct inode *inode, struct file *file)
 {
-    gpio_set_value(GPIO_NUMBER_27, LOW);
-    gpio_free(GPIO_NUMBER_27);
     pr_info("System call close() called...!!!\n");
-    pr_info("GPIO27 set to LOW and released\r\n");
 
     return 0;
 }
@@ -78,7 +65,7 @@ static ssize_t m_read(struct file *filp, char __user *user_buffer, size_t size, 
 
     pr_info("System call read() called...!!!\n");
 
-    /* Check size doesn't exceed our mapped area size */
+    // Check size doesn't exceed our mapped area size
     to_read = (size > mdev.size - *offset) ? (mdev.size - *offset) : size;
 
 	if (copy_to_user(user_buffer, mdev.kmalloc_ptr + *offset, to_read))
@@ -97,7 +84,7 @@ static ssize_t m_write(struct file *filp, const char __user *user_buffer, size_t
 
     pr_info("System call write() called...!!!\n");
 
-    /* Check size doesn't exceed our mapped area size */
+    // Check size doesn't exceed our mapped area size
 	to_write = (size + *offset > NPAGES * PAGE_SIZE) ? (NPAGES * PAGE_SIZE - *offset) : size;
 
 	memset(mdev.kmalloc_ptr, 0, NPAGES * PAGE_SIZE);
@@ -126,9 +113,11 @@ static ssize_t m_write(struct file *filp, const char __user *user_buffer, size_t
 }
 
 static int __init gpio_kernel_module_init(void)
-{   
-    /* 1. Allocating device number (cat /pro/devices)*/
-    if (alloc_chrdev_region(&mdev.dev_num, 0, 1, "m_gpio_dev") < 0) {
+{
+    int ret;
+
+    // Allocating device number (cat /pro/devices)
+    if (alloc_chrdev_region(&mdev.dev_num, 0, 1, "m_cdev") < 0) {
 	    pr_err("Failed to alloc chrdev region\n");
 	    return -1;
     }
@@ -156,7 +145,20 @@ static int __init gpio_kernel_module_init(void)
         goto rm_device;
     }
 
-    pr_info("Hello kernel module\r\n");
+    ret = gpio_request(GPIO_NUMBER_27, "gpio_27");
+    if (ret) {
+        pr_err("gpio_request failed\n");
+        return ret;
+    }
+
+    ret = gpio_direction_output(GPIO_NUMBER_27, LOW);
+    if (ret) {
+        pr_err("gpio_direction_output failed\n");
+        gpio_free(GPIO_NUMBER_27);
+        return ret;
+    }
+    pr_info("GPIO27 configured as output\r\n");
+
     return 0;
 
 rm_device:
@@ -170,6 +172,10 @@ rm_device_numb:
 
 static void __exit gpio_kernel_module_exit(void)
 {
+    gpio_set_value(GPIO_NUMBER_27, LOW);
+    gpio_free(GPIO_NUMBER_27);
+    pr_info("GPIO27 set to LOW and released\r\n");
+
     kfree(mdev.kmalloc_ptr);
     device_destroy(mdev.m_class, mdev.dev_num);
     class_destroy(mdev.m_class);
